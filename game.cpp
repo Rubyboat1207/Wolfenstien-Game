@@ -2,6 +2,9 @@
 #include <string>
 #include <math.h>
 #include <cmath>
+#include <vector>
+#include <utility>
+#include <optional>
 
 const Uint8* state = SDL_GetKeyboardState(nullptr);
 
@@ -29,6 +32,7 @@ const std::string room[] = {
     "7777777777777777777",
 };
 
+
 struct Player {
     float x = 4.f;
     float y = 4.f;
@@ -38,72 +42,13 @@ struct Player {
     float z = 0.f;
 };
 
-Player player = {6.f, 2.f, 0.f};
+Player player = {0.f, 0.f, 0.f};
 
 double toRadians(double degrees) {
     return degrees * M_PI / 180;
 }
 
-class Ray {
 
-
-public:
-    void shoot();
-    Ray(float origin_x, float origin_y, float rot) {
-        this->origin_x = origin_x;
-        this->origin_y = origin_y;
-        this->rot = rot;
-    }
-    float origin_x;
-    float origin_y;
-    float rot;
-    float dist;
-    char hitType;
-};
-float resolution = 0.02;
-void Ray::shoot() {
-    bool hit = false;
-
-    float cur_x = this->origin_x;
-    float cur_y = this->origin_y;
-
-    int iter = 0;
-    int max_iter = 1000000;
-
-    float radians = toRadians(this->rot);
-
-    while (!hit && iter < max_iter) {
-        // I intentionally flipped sin and cos so that the player faced up
-        // I need to offset a point by a resolution at an angle in radians
-        // Using the functions sin and cos, I know where the point will be:
-        // 1. on a circle of radius = resolution
-        // 2. at theta = radians
-
-        cur_x += std::sin(radians) * resolution;
-        cur_y += std::cos(radians) * resolution;
-
-        int wall_x = std::round(cur_y);
-        int wall_y = std::round(cur_x);
-
-        char hitPoint = room[wall_x][wall_y];
-        if (hitPoint != '0') {
-            hit = true;
-
-            this->hitType = hitPoint;
-            // printf("%c", hitPoint);
-        }
-        iter++;
-    }
-
-    if (iter > max_iter) {
-        printf("hit max");
-    }
-
-    // Pythagorean Theorem to get the distance between 2 points
-    // sqrt( (x1 - x2)² + (y1 - y2)² )
-    // in the above case, point 1 is the origin, and point 2 is the position of the ray hit
-    this->dist = sqrt(pow(this->origin_x - cur_x, 2) + pow(this->origin_y - cur_y, 2));
-}
 
 struct Vector2 {
     float x;
@@ -117,7 +62,131 @@ struct Vector2 {
         float mag = this->magnitude();
         return { this->x / mag, this->y / mag };
     }
+
+    Vector2 operator-(Vector2 vec) {
+        return { this->x - vec.x, this->y - vec.y };
+    }
+
+    Vector2 abs() {
+        return { std::abs(this->x), std::abs(this->y) };
+    }
+
+    float cross(Vector2 v2) {
+        return v2.x * this->y - this->x * v2.y;
+    }
+
+    float dot(Vector2 v2) {
+        return this->x * v2.x + this->y * v2.y;
+    }
 };
+
+const std::vector<std::pair<Vector2, Vector2>> roomLines = std::vector<std::pair<Vector2, Vector2>>({
+    std::pair<Vector2, Vector2>({-5,5}, {5,5}),
+    std::pair<Vector2, Vector2>({5,5}, {5,-5}),
+    std::pair<Vector2, Vector2>({5,-5}, {-5,-5}),
+    std::pair<Vector2, Vector2>({-5,-5}, {-5,5}),
+});
+
+
+class Ray {
+
+
+public:
+    void shoot();
+    Vector2 calcHit();
+    Ray(float origin_x, float origin_y, float rot) {
+        this->origin_x = origin_x;
+        this->origin_y = origin_y;
+        this->rot = rot;
+    }
+    float origin_x;
+    float origin_y;
+    float rot;
+    float dist = -1;
+    char hitType;
+    char maxDist = 1000;
+    float getRadians() {
+        return toRadians(rot);
+    }
+    
+};
+
+Vector2 Ray::calcHit() {
+    float radians = toRadians(this->rot);
+    float distance = maxDist;
+    if (this->dist != -1) {
+        distance = this->dist;
+    }
+    return { std::sin(radians) * distance, std::cos(radians) * distance };
+}
+
+std::optional<Vector2> intersectionPoint(Ray ray, Vector2 p3, Vector2 p4) {
+    //Formula courtesy of: https://rootllama.wordpress.com/2014/06/20/ray-line-segment-intersection-test-in-2d/
+    Vector2 o = { ray.origin_x, ray.origin_y };
+
+    Vector2 v1 = o - p3;
+    Vector2 v2 = p4 - p3;
+    Vector2 v3 = { -std::sin(ray.getRadians()), std::cos(ray.getRadians()) }; // inverse of direction
+    // (v2 * v1)
+    float t1_top = v1.cross(v2);
+    float t1_bottom = v2.dot(v3);
+
+    float t1 = t1_top / t1_bottom;
+
+    float t2 = v1.dot(v3) / v2.dot(v3);
+
+    if (t1 >= 0 && t2 <= 1) {
+        Vector2 intersect = { t1, t2 };
+        return std::make_optional<Vector2>(intersect);
+    }
+    return std::nullopt;
+}
+
+float resolution = 0.02;
+void Ray::shoot() {
+    bool hit = false;
+
+    Vector2 pos = { this->origin_x, this->origin_y };
+
+    int iter = 0;
+
+    float radians = toRadians(this->rot);
+
+    Vector2* closestPoint = nullptr;
+    float closestDistance = INFINITY;
+
+    for (std::pair<Vector2, Vector2> line : roomLines) {
+        auto point = intersectionPoint(*this, line.first, line.second);
+        if (point.has_value()) {
+            auto certainPoint = point.value();
+
+            float distance = sqrt(pow(this->origin_x - certainPoint.x, 2) + pow(this->origin_y - certainPoint.y, 2));
+
+            if (closestPoint == nullptr || closestDistance > distance) {
+                closestPoint = &certainPoint;
+                closestDistance = distance;
+                continue;
+            }
+        }
+    }
+
+    if (closestPoint == nullptr) {
+        printf("Hole Detected in map.");
+    }
+    else {
+        this->hitType = '1';
+    }
+
+
+
+    // Pythagorean Theorem to get the distance between 2 points
+    // sqrt( (x1 - x2)² + (y1 - y2)² )
+    // in the above case, point 1 is the origin, and point 2 is the position of the ray hit
+    this->dist = closestDistance;
+}
+
+
+
 
 Vector2 getSurfaceNormalFromRay(Ray ray) {
     float radians = toRadians(ray.rot);
@@ -181,11 +250,11 @@ void runGameLoop(SDL_Surface* surface, double frameDelta) {
     player.rot += move_r * player.rot_speed * frameDelta;
 
 
-    player.x += std::sin(radians) * player.speed * move_x * frameDelta;
-    player.y += std::cos(radians) * player.speed * move_x * frameDelta;
+    player.x += std::cos(radians) * player.speed * move_x * frameDelta;
+    player.y += std::sin(radians) * player.speed * move_x * frameDelta;
 
-    player.x += std::sin(radians + 90) * player.speed * move_y * frameDelta;
-    player.y += std::cos(radians + 90) * player.speed * move_y * frameDelta;
+    player.x += std::cos(radians + 90) * player.speed * move_y * frameDelta;
+    player.y += std::sin(radians + 90) * player.speed * move_y * frameDelta;
 
     if (player.y > room->length()) {
         player.y = 2;
@@ -198,8 +267,8 @@ void runGameLoop(SDL_Surface* surface, double frameDelta) {
     for (int x = 0; x < surface->w; x++) {
         Vector2 radian_pl = {toRadians(player.rot - 90), toRadians(player.rot)};
 
-        Vector2 sideways = {sin(radian_pl.x), cos(radian_pl.x)};
-        Vector2 forward = {sin(radian_pl.y), cos(radian_pl.y)};
+        Vector2 sideways = {cos(radian_pl.x), sin(radian_pl.x)};
+        Vector2 forward = {cos(radian_pl.y), sin(radian_pl.y)};
 
         Ray ray = Ray(player.x + (sideways.x * x_offset), player.y + (sideways.x * x_offset), player.rot + ((x - center_x) / fov));
         ray.shoot();
