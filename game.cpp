@@ -13,12 +13,20 @@ void set_pixel(SDL_Surface* surface, int x, int y, Uint32 pixel)
     *target_pixel = pixel;
 }
 
-const std::string room[5] = {
-    "8888888888",
-    "2100000003",
-    "2000100003",
-    "2000000003",
-    "7777777777"
+const std::string room[] = {
+    "8888888888888888888",
+    "3000000000000000003",
+    "3000000000000000003",
+    "3000000008800000003",
+    "3000000800008000003",
+    "3000000000000000003",
+    "3000000000000000003",
+    "3000000000000000003",
+    "3000100100001001003",
+    "3000100100001001003",
+    "3000111100001111003",
+    "3000000000000000003",
+    "7777777777777777777",
 };
 
 struct Player {
@@ -27,6 +35,7 @@ struct Player {
     float rot = 0.f;
     float speed = 0.002f;
     float rot_speed = 0.2f;
+    float z = 0.f;
 };
 
 Player player = {6.f, 2.f, 0.f};
@@ -51,7 +60,7 @@ public:
     float dist;
     char hitType;
 };
-
+float resolution = 0.02;
 void Ray::shoot() {
     bool hit = false;
 
@@ -61,15 +70,21 @@ void Ray::shoot() {
     int iter = 0;
     int max_iter = 1000000;
 
-    float resolution = 0.03;
     float radians = toRadians(this->rot);
 
     while (!hit && iter < max_iter) {
         // I intentionally flipped sin and cos so that the player faced up
+        // I need to offset a point by a resolution at an angle in radians
+        // Using the functions sin and cos, I know where the point will be:
+        // 1. on a circle of radius = resolution
+        // 2. at theta = radians
+
         cur_x += std::sin(radians) * resolution;
         cur_y += std::cos(radians) * resolution;
+
         int wall_x = std::round(cur_y);
         int wall_y = std::round(cur_x);
+
         char hitPoint = room[wall_x][wall_y];
         if (hitPoint != '0') {
             hit = true;
@@ -84,6 +99,9 @@ void Ray::shoot() {
         printf("hit max");
     }
 
+    // Pythagorean Theorem to get the distance between 2 points
+    // sqrt( (x1 - x2)² + (y1 - y2)² )
+    // in the above case, point 1 is the origin, and point 2 is the position of the ray hit
     this->dist = sqrt(pow(this->origin_x - cur_x, 2) + pow(this->origin_y - cur_y, 2));
 }
 
@@ -121,7 +139,7 @@ Vector2 getSurfaceNormalFromRay(Ray ray) {
 Uint32 getColorFromChar(char c) {
     switch (c) {
     case '0': return 0x0;
-    case '1': return 0xff0000;
+    case '1': return 0xffa000;
     case '2': return 0x00ff00;
     case '3': return 0xff0000;
     case '4': return 0xffff00;
@@ -134,13 +152,25 @@ Uint32 getColorFromChar(char c) {
     }  
 }
 
-
+float fov = 15;
+float wall_scale_factor = 23;
+float distance_scale_factor = 18;
+float x_offset = 0.5;
 
 void runGameLoop(SDL_Surface* surface, double frameDelta) {
-    float fov = 10;
-    float frustum_offset = 1500;
-    float center = surface->h / 2;
-    float wall_scale_factor = 40;
+    fov += ((state[SDL_SCANCODE_O] ? 1 : 0) - (state[SDL_SCANCODE_L] ? 1 : 0)) * frameDelta * 0.01;
+    float center_y = surface->h / 2;
+    float center_x = surface->w / 2;
+
+    // wall_scale_factor += ((state[SDL_SCANCODE_I] ? 1 : 0) - (state[SDL_SCANCODE_K] ? 1 : 0)) * frameDelta * 0.01;
+    // distance_scale_factor += ((state[SDL_SCANCODE_U] ? 1 : 0) - (state[SDL_SCANCODE_J] ? 1 : 0)) * frameDelta * 0.01;
+    // x_offset += ((state[SDL_SCANCODE_Y] ? 1 : 0) - (state[SDL_SCANCODE_H] ? 1 : 0)) * frameDelta * 0.01;
+
+    if(state[SDL_SCANCODE_P]) {
+        printf("fov: %f\nwsf: %f\ndsf: %f\n", fov, wall_scale_factor, distance_scale_factor);
+    }
+    // Causes crashes lol
+    // resolution += ((state[SDL_SCANCODE_Y] ? 1 : 0) - (state[SDL_SCANCODE_H] ? 1 : 0)) * frameDelta * 0.001;
 
     float radians = toRadians(player.rot);
     float move_x = (state[SDL_SCANCODE_W] ? 1 : 0) - (state[SDL_SCANCODE_S] ? 1 : 0);
@@ -166,25 +196,47 @@ void runGameLoop(SDL_Surface* surface, double frameDelta) {
 
 
     for (int x = 0; x < surface->w; x++) {
-        Ray ray = Ray(player.x + (x / frustum_offset), player.y, player.rot + (x / fov));
+        Vector2 radian_pl = {toRadians(player.rot - 90), toRadians(player.rot)};
+
+        Vector2 sideways = {sin(radian_pl.x), cos(radian_pl.x)};
+        Vector2 forward = {sin(radian_pl.y), cos(radian_pl.y)};
+
+        Ray ray = Ray(player.x + (sideways.x * x_offset), player.y + (sideways.x * x_offset), player.rot + ((x - center_x) / fov));
         ray.shoot();
         for (int y = 0; y < surface->h; y++) {
-            if (abs(center - y) < (8 - ray.dist) * wall_scale_factor) {
+            if (abs(center_y - y) < (distance_scale_factor / ray.dist) * wall_scale_factor) {
                 auto color = getColorFromChar(ray.hitType);
-                auto r = (color >> 24) & 0xFF;
-                auto g = (color >> 16) & 0xFF;
-                auto b = (color >> 8) & 0xFF;
+                int r = (color >> 24) & 0xFF;
+                int g = (color >> 16) & 0xFF;
+                int b = (color >> 8) & 0xFF;
 
-                r *= ((10 - ray.dist) / 10);
-                g *= ((10 - ray.dist) / 10);
-                b *= ((10 - ray.dist) / 10);
+                float calcdist = (10 - ray.dist);
+
+                if(calcdist < 0) {
+                    calcdist = 0;
+                }
+
+                r *= calcdist / 10;
+                g *= calcdist / 10;
+                b *= calcdist / 10;
+
+                if(r > 255) {
+                    r = 255;
+                }
+                if(g > 255) {
+                    g = 255;
+                }
+                if(b > 255) {
+                    b = 255;
+                }
+
 
                 color = (r << 24) | (g << 16) | (b << 8) | (color & 0xFF);
 
                 set_pixel(surface, x, y, color);
             }
             else {
-                set_pixel(surface, x, y, y > center ? 0xaaaaaa : 0xffffff);
+                set_pixel(surface, x, y, y > center_y ? 0xaaaaaa : 0xffffff);
             }
         }
 

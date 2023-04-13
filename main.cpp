@@ -66,6 +66,9 @@ int main(int argc, char* args[])
 				runGameLoop(screenSurface, (double)((NOW - LAST) * 1000 / (double)SDL_GetPerformanceFrequency()));
 				//Update the surface
 				SDL_UpdateWindowSurface(window);
+				if(state[SDL_SCANCODE_Q]) {
+					quit = true;
+				}
 			}
 		}
 	}
